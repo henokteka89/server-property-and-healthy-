@@ -1,0 +1,113 @@
+-- When were Statistics last updated on all indexes?  (Query 76) (Statistics Update)
+SELECT SCHEMA_NAME(o.Schema_ID) + N'.' + o.[NAME] AS [Object Name], o.[type_desc] AS [Object Type],
+      i.[name] AS [Index Name], STATS_DATE(i.[object_id], i.index_id) AS [Statistics Date], 
+      s.auto_created, s.no_recompute, s.user_created, s.is_incremental, s.is_temporary, 
+	  s.has_persisted_sample, sp.persisted_sample_percent, 
+	  (sp.rows_sampled * 100)/sp.rows AS [Actual Sample Percent], sp.modification_counter,
+	  st.row_count, st.used_page_count
+FROM sys.objects AS o WITH (NOLOCK)
+INNER JOIN sys.indexes AS i WITH (NOLOCK)
+ON o.[object_id] = i.[object_id]
+INNER JOIN sys.stats AS s WITH (NOLOCK)
+ON i.[object_id] = s.[object_id] 
+AND i.index_id = s.stats_id
+INNER JOIN sys.dm_db_partition_stats AS st WITH (NOLOCK)
+ON o.[object_id] = st.[object_id]
+AND i.[index_id] = st.[index_id]
+CROSS APPLY sys.dm_db_stats_properties(s.object_id, s.stats_id) AS sp
+WHERE o.[type] IN ('U', 'V')
+AND st.row_count > 0
+ORDER BY STATS_DATE(i.[object_id], i.index_id) DESC OPTION (RECOMPILE);
+------  
+
+-- Helps discover possible problems with out-of-date statistics
+-- Also gives you an idea which indexes are the most active
+
+-- sys.stats (Transact-SQL)
+-- https://urldefense.com/v3/__https://bit.ly/2GyAxrn__;!!PyqGXjU!I7gZVLcRmph2IdAZK3HuTjoSQ0-wuORsGEyuHjbc4Y4RaASoSXs7iZ3QA_W3RvS4XVcF5D1SUQQCgLxZPA$ 
+
+-- UPDATEs to Statistics (Erin Stellato)
+-- https://urldefense.com/v3/__https://bit.ly/2vhrYQy__;!!PyqGXjU!I7gZVLcRmph2IdAZK3HuTjoSQ0-wuORsGEyuHjbc4Y4RaASoSXs7iZ3QA_W3RvS4XVcF5D1SUQQhGkE9Kg$ 
+
+
+
+
+-- Look at most frequently modified indexes and statistics (Query 77) (Volatile Indexes)
+SELECT o.[name] AS [Object Name], o.[object_id], o.[type_desc], s.[name] AS [Statistics Name], 
+       s.stats_id, s.no_recompute, s.auto_created, s.is_incremental, s.is_temporary,
+	   sp.modification_counter, sp.[rows], sp.rows_sampled, sp.last_updated
+FROM sys.objects AS o WITH (NOLOCK)
+INNER JOIN sys.stats AS s WITH (NOLOCK)
+ON s.object_id = o.object_id
+CROSS APPLY sys.dm_db_stats_properties(s.object_id, s.stats_id) AS sp
+WHERE o.[type_desc] NOT IN (N'SYSTEM_TABLE', N'INTERNAL_TABLE')
+AND sp.modification_counter > 0
+ORDER BY sp.modification_counter DESC, o.name OPTION (RECOMPILE);
+------
+
+-- This helps you understand your workload and make better decisions about 
+-- things like data compression and adding new indexes to a table
+
+
+
+-- Get fragmentation info for all indexes above a certain size in the current database  (Query 78) (Index Fragmentation)
+-- Note: This query could take some time on a very large database
+SELECT DB_NAME(ps.database_id) AS [Database Name], SCHEMA_NAME(o.[schema_id]) AS [Schema Name],
+OBJECT_NAME(ps.OBJECT_ID) AS [Object Name], i.[name] AS [Index Name], ps.index_id, ps.index_type_desc, 
+CAST(ps.avg_fragmentation_in_percent AS DECIMAL (15,3)) AS [Avg Fragmentation in Pct], 
+ps.fragment_count, ps.page_count, i.fill_factor, i.has_filter, i.filter_definition, i.[allow_page_locks]
+FROM sys.dm_db_index_physical_stats(DB_ID(),NULL, NULL, NULL , N'LIMITED') AS ps
+INNER JOIN sys.indexes AS i WITH (NOLOCK)
+ON ps.[object_id] = i.[object_id] 
+AND ps.index_id = i.index_id
+INNER JOIN sys.objects AS o WITH (NOLOCK)
+ON i.[object_id] = o.[object_id]
+WHERE ps.database_id = DB_ID()
+AND ps.page_count > 2500
+ORDER BY ps.avg_fragmentation_in_percent DESC OPTION (RECOMPILE);
+------
+
+-- Helps determine whether you have framentation in your relational indexes
+-- and how effective your index maintenance strategy is
+
+
+--- Index Read/Write stats (all tables in current DB) ordered by Reads  (Query 79) (Overall Index Usage - Reads)
+SELECT SCHEMA_NAME(t.[schema_id]) AS [SchemaName], OBJECT_NAME(i.[object_id]) AS [ObjectName], 
+       i.[name] AS [IndexName], i.index_id, i.[type_desc] AS [Index Type],
+       s.user_seeks, s.user_scans, s.user_lookups,
+	   s.user_seeks + s.user_scans + s.user_lookups AS [Total Reads], 
+	   s.user_updates AS [Writes],  
+	   i.fill_factor AS [Fill Factor], i.has_filter, i.filter_definition, 
+	   s.last_user_scan, s.last_user_lookup, s.last_user_seek, i.[allow_page_locks]
+FROM sys.indexes AS i WITH (NOLOCK)
+LEFT OUTER JOIN sys.dm_db_index_usage_stats AS s WITH (NOLOCK)
+ON i.[object_id] = s.[object_id]
+AND i.index_id = s.index_id
+AND s.database_id = DB_ID()
+LEFT OUTER JOIN sys.tables AS t WITH (NOLOCK)
+ON t.[object_id] = i.[object_id]
+WHERE OBJECTPROPERTY(i.[object_id],'IsUserTable') = 1
+ORDER BY s.user_seeks + s.user_scans + s.user_lookups DESC OPTION (RECOMPILE); -- Order by reads
+------
+
+-- Show which indexes in the current database are most active for Reads
+
+
+--- Index Read/Write stats (all tables in current DB) ordered by Writes  (Query 80) (Overall Index Usage - Writes)
+SELECT SCHEMA_NAME(t.[schema_id]) AS [SchemaName],OBJECT_NAME(i.[object_id]) AS [ObjectName], 
+	   i.[name] AS [IndexName], i.index_id, i.[type_desc] AS [Index Type],
+	   s.user_updates AS [Writes], s.user_seeks + s.user_scans + s.user_lookups AS [Total Reads], 
+	   i.fill_factor AS [Fill Factor], i.has_filter, i.filter_definition,
+	   s.last_system_update, s.last_user_update, i.[allow_page_locks]
+FROM sys.indexes AS i WITH (NOLOCK)
+LEFT OUTER JOIN sys.dm_db_index_usage_stats AS s WITH (NOLOCK)
+ON i.[object_id] = s.[object_id]
+AND i.index_id = s.index_id
+AND s.database_id = DB_ID()
+LEFT OUTER JOIN sys.tables AS t WITH (NOLOCK)
+ON t.[object_id] = i.[object_id]
+WHERE OBJECTPROPERTY(i.[object_id],'IsUserTable') = 1
+ORDER BY s.user_updates DESC OPTION (RECOMPILE);						 -- Order by writes
+------
+
+-- Show which indexes in the current database are most active for Writes
