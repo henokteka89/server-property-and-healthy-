@@ -10,3 +10,7 @@ INNER JOIN sys.databases AS db WITH (NOLOCK)
 ON lsu.database_id = db.database_id
 OPTION (RECOMPILE);
 ------
+-- Look at log file size and usage, along with the log reuse wait description for the current database
+
+-- sys.dm_db_log_space_usage (Transact-SQL)
+-- https://urldefense.com/v3/__https://bit.ly/2H4MQw9__;!!PyqGXjU!I7gZVLcRmph2IdAZK3HuTjoSQ0-wuORsGEyuHjbc4Y4RaASoSXs7iZ3QA_W3RvS4XVcF5D1SUQTah5LPdA$ 
