@@ -1,0 +1,10 @@
+-- Get tempdb version store space usage by database (Query 40) (Version Store Space Usage)
+SELECT DB_NAME(database_id) AS [Database Name],
+       reserved_page_count AS [Version Store Reserved Page Count], 
+	   reserved_space_kb/1024 AS [Version Store Reserved Space (MB)] 
+FROM sys.dm_tran_version_store_space_usage WITH (NOLOCK) 
+ORDER BY reserved_space_kb/1024 DESC OPTION (RECOMPILE);
+------  
+
+-- sys.dm_tran_version_store_space_usage (Transact-SQL)
+-- https://urldefense.com/v3/__https://bit.ly/2vh3Bmk__;!!PyqGXjU!I7gZVLcRmph2IdAZK3HuTjoSQ0-wuORsGEyuHjbc4Y4RaASoSXs7iZ3QA_W3RvS4XVcF5D1SUQRjtXqeDg$ 
